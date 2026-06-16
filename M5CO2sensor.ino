@@ -1,7 +1,8 @@
 /**
  * CO2 sensor using a M5stick plus and SGP30 sensor
- * Board library : ESP32 3.2.0
- * Libraries: Adafruit SGP30 2.0.3 - M5Family 0.1.3 - M5GFX 0.2.9 - M5HAL 0.0.1 - M5Stack 0.4.6 - M5StickCPlus2 1.0.1 - M5Unified 0.2.7 - M5Utility 0.0.9
+ * Board library : ESP32 3.3.10
+ * Libraries: requires M5StickCPlus2 1.0.1 
+ *            - M5Unified 0.2.7 - M5Utility 0.0.9
  * Original SGP30 library from Adafruit caused conflicts with the ESP32 SPI driver: we override
  * it to change the SPI driver that it used: this required to change from "private" to "protected" some members of original Adafruit class
  * History:
@@ -15,6 +16,8 @@
  *
  */
 #include <M5Unified.h>
+#include <M5StickCPlus2.h>
+
 #include <Wire.h>
 #include "SGP30_M5.h"
 
@@ -143,7 +146,10 @@ void setup()
 		canvasHeader.fillSprite(TFT_NAVY);    
         canvasHeader.drawString("%CO2",lcd_width/2-int(lcd_width/5), 5);
         canvasHeader.pushSprite(&M5.Lcd, 0, 0);
-	} else
+
+        M5.Speaker.setVolume(250);        
+        M5.Speaker.tone(1000, 500);        
+    } else
 	{
 		Serial.println("INIT FAILED");
 	}	
