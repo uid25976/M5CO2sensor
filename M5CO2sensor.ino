@@ -18,8 +18,10 @@
 #include <M5Unified.h>
 #include <M5StickCPlus2.h>
 
-#include <Wire.h>
-#include "SGP30_M5.h"
+// ESP32 debug origin 
+static const  char* TAG = "MAIN";
+
+#include "CO2sensGen.h"
 
 // proto ----------------------------------------------------
 void displayMainValue(float fval);
@@ -27,29 +29,21 @@ void displayMAXvalue(float fval);
 
 
 // customize ------------------------------------------------
-#define DUMP_ON_SERIAL
+#define ACQ_TIMEOUT_S (uint32_t)300u
 
 // constant --------------------------------------------------
-// I2C pins of the M5 grove connector
-#define GPIO_SDA_EXT 32
-#define GPIO_SCL_EXT 33
 
-// tune humidity compensation: page 10 of data sheet
-// target: 13degC 95%HR (optimized for caves)
-// units : mg/m3
-const uint32_t HR_MG_M3 = 10753;
-// sensor delay before operational
-const uint32_t stabilization_time_ms = 15000;
 // CO2 thresholds to notify level of danger 
 const float thres1 = 0.1;
 const float thres2 = 0.5;
 const float thres3 = 4;
+// display settings
 const int header_height = 35;
 const int footer_height = 45;
 
 // variables ------------------------------------------------
 // sensor object
-SGP30_M5 sgp;
+CO2sensGen CO2sensor;
 static uint32_t last_millis = 0;
 static int16_t lcd_width = 0;
 static int16_t lcd_height = 0;
@@ -67,42 +61,27 @@ M5Canvas canvasFooter(&M5.Lcd);
 // ===========================================================
 void setup() 
 {
+    bool report = false;
 	auto cfg = M5.config();  // Assign a structure for initializing M5Stack
     
-    M5.begin(cfg);  // initialize M5 device
+    M5.begin(cfg);  // initialize M5 device    
+
+    // buzzer volume
+    M5.Speaker.setVolume(250);
+
+    // Init display --------------------------------
     M5.Lcd.clear(TFT_BLACK);
     lcd_width = M5.Lcd.width();
     lcd_height = M5.Lcd.height();
 
     main_height = lcd_height-(header_height + footer_height);
     
-    
-    
-    // I2C init -------------------	
-    Wire.begin(GPIO_SDA_EXT, GPIO_SCL_EXT); // Initialize I2C with SDA pin 32 and SCL pin 33 for M5StickC Plus2
-    Wire.setClock(400000); // Set I2C clock speed to 400 kHz
-	
-	// SW reset using general call addr --------    
-    sgp.softReset();
-	
-	// Serial port init for debug --------------
-	Serial.begin(115200);
-
-
-    // Init the sensor -------------------------
-	bool report = sgp.begin();	
-	if (!report) 
-    {
-      Serial.println("INIT FAILED");
-	  while (1);
-    } 
-
     // create header ------------------------------
     canvasHeader.createSprite(lcd_width, header_height);
     canvasHeader.fillSprite(TFT_NAVY);    
     canvasHeader.setTextSize(3);
     canvasHeader.setTextColor(TFT_YELLOW);  
-    canvasHeader.drawString("WAIT",lcd_width/2-int(lcd_width/5), 5);
+    canvasHeader.drawString("INIT",lcd_width/2-int(lcd_width/5), 5);
     canvasHeader.pushSprite(&M5.Lcd, 0, 0);//"&M5
 	
 
@@ -119,40 +98,49 @@ void setup()
     canvasMain.fillSprite(TFT_BLACK);    
     canvasMain.setTextSize(4);
     canvasMain.setTextColor(TFT_WHITE);  
-    canvasMain.drawString("...",lcd_width/3, int(main_height/5));
+    canvasMain.drawString("WAIT",lcd_width/3, int(main_height/5));
     canvasMain.pushSprite(&M5.Lcd, 0, header_height);
+        
+	ESP_LOGI(TAG, "Init sensor started");
+    
+    // Sensor init -------------------	    
+	report = CO2sensor.begin();
+	if (!report) 
+    {
+        ESP_LOGE(TAG, "Sensor not found");
 
+        M5.Speaker.tone(740, 500);             
 
-    // set humidity ------------------------------
-    report = sgp.setHumidity(HR_MG_M3);
+        canvasMain.clear(TFT_BLACK);
+        canvasMain.setTextColor(TFT_RED);
+        canvasMain.drawString("NO",lcd_width/3, int(main_height/5));
+        canvasMain.drawString("SENSOR",0, 2*int(main_height/5));
+        canvasMain.pushSprite(&M5.Lcd, 0, header_height);
+        // stop forever: we cannot do anything
+        while (1);
+    }
+    
+
+    // start sensor meaurements
+    report = CO2sensor.startMeasurements();
     if (!report) 
     {
-      Serial.println("HR FIX FAILED");
-	  while (1);
-    } 
+        ESP_LOGE(TAG, "Sensor start error");
 
-    // dummy measurements during stabilization time
-	uint32_t init_start_ts = millis();;
-    while ((millis() - init_start_ts) < stabilization_time_ms)
-	{		
-		report = sgp.IAQmeasure();
-        delay(1000);
-	}
+        M5.Speaker.tone(740, 500);        
 
-
-	
-	if (report)
-	{
-		canvasHeader.fillSprite(TFT_NAVY);    
-        canvasHeader.drawString("%CO2",lcd_width/2-int(lcd_width/5), 5);
-        canvasHeader.pushSprite(&M5.Lcd, 0, 0);
-
-        M5.Speaker.setVolume(250);        
-        M5.Speaker.tone(1000, 500);        
-    } else
-	{
-		Serial.println("INIT FAILED");
-	}	
+        canvasMain.clear(TFT_BLACK);
+        canvasMain.setTextColor(TFT_RED);
+        canvasMain.drawString("ERROR",4, int(main_height/5));
+        canvasMain.pushSprite(&M5.Lcd, 0, header_height);
+        // stop forever: we cannot do anything
+        while (1);
+    }
+    
+	ESP_LOGI(TAG, "Sensor Init OK");
+    canvasHeader.fillSprite(TFT_NAVY);    
+    canvasHeader.drawString("%CO2",lcd_width/2-int(lcd_width/5), 5);
+    canvasHeader.pushSprite(&M5.Lcd, 0, 0);
 }
 
 
@@ -162,25 +150,29 @@ void setup()
 // ===========================================================
 void loop() 
 {
-   if (!sgp.IAQmeasure()) 
-   {  // Commands the sensor to take a single eCO2/VOC                              
-      Serial.println("Measurement failed");      
-   } else
-   {
-        co2percent = (float)sgp.eCO2/10000; // 100(convert to %)/1000000(ppm) =  10000
-	        
-        displayMainValue(co2percent);
 
-#ifdef DUMP_ON_SERIAL
-        Serial.printf("\nCO2 %d ppm", sgp.eCO2);
-        Serial.printf("\nCO2 %.2f %%", co2percent);
-#endif
-        if (co2percent > co2percentMAX)
+    if ( CO2sensor.areDataReady() )
+    {
+        ESP_LOGI(TAG, "New measurement available");
+        
+        displayMainValue(co2percent);
+        displayMAXvalue(co2percentMAX);
+
+    } else
+    {
+        // check if time since last measurement matches expected periodicity
+        uint32_t time_elapsed = CO2sensor.get_timeSinceLastSuccessfulMeasure_s();
+        if (time_elapsed > ACQ_TIMEOUT_S)
         {
-            co2percentMAX = co2percent;
-            displayMAXvalue(co2percentMAX);
+            ESP_LOGE(TAG, "Timeout on valid acquisitions");
+            M5.Speaker.tone(200, 500);        
+            canvasMain.clear(TFT_BLACK);
+            canvasMain.setTextColor(TFT_RED);
+            canvasMain.drawString("ERROR",lcd_width/3, int(main_height/5));
+            canvasMain.pushSprite(&M5.Lcd, 0, header_height);
         }
-   }
+    }
+
 
    // one sec delay required between measurements
    delay(1000);
@@ -207,6 +199,7 @@ void displayMainValue(float fval)
     } else 
     {
         canvasMain.setTextColor(TFT_RED);
+        M5.Speaker.tone(740, 700);
     }
     // value, nb decimals, X offset, Y offset
     canvasMain.drawFloat(fval, 1, lcd_width/4, int(main_height/5));
