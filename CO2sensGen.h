@@ -6,13 +6,21 @@
 #define CO2SENSGEN_H
 
 #include "Arduino.h"
+#include <map>
+
+// missing command in the driver
+#define SCD4x_COMMAND_WAKEUP       0x36F6  // execution time: 30ms
+#define SCD4x_COMMAND_POWEROFF		 0x36E0  //
+// sensor names
+static const std::map<int, const char*> sensor_type_dict = { {0,"SCD40"},{1,"SCD41"},{2,"???"} };
+
 
 // filter constant
-const float alpha = 0.32f; // Adjust for smoothness (0.1-0.5 typical)
+static const float alpha = 0.32f; // Adjust for smoothness (0.1-0.5 typical)
 
 /*!
  *  @brief  Class that stores state and functions for interacting with
- *          SGP30 Gas Sensor
+ *          SCD41 Gas Sensor
  */
 class CO2sensGen
 {
@@ -23,17 +31,18 @@ public:
 	// init sensor and I2C
 	bool begin();
 	
+	// preliminary checks
+	bool prepareMeasurements();
 
 	// init measurements (even if one is ongoing)
-	bool startMeasurements();
+	bool getMeasurements();
 
-	// is data ready ?
-	bool areDataReady();
 	
   float getterCO2percent();
 	float getterCO2filtered();
 	float getterCO2max();
 	uint32_t get_timeSinceLastSuccessfulMeasure_s();
+	const char* getSensorName();
 
 protected:
 	void CO2calcUpdates();
@@ -50,6 +59,8 @@ protected:
 
 	float tempDegC;
 	float humidityPerCent;
+
+	int sensorType;
 };
 
 #endif 

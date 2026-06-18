@@ -61,7 +61,7 @@ M5Canvas canvasFooter(&M5.Lcd);
 // ===========================================================
 void setup() 
 {
-    bool report = false;
+    bool success = false;
 	auto cfg = M5.config();  // Assign a structure for initializing M5Stack
     
     M5.begin(cfg);  // initialize M5 device    
@@ -104,8 +104,8 @@ void setup()
 	ESP_LOGI(TAG, "Init sensor started");
     
     // Sensor init -------------------	    
-	report = CO2sensor.begin();
-	if (!report) 
+	success = CO2sensor.begin();
+	if (!success) 
     {
         ESP_LOGE(TAG, "Sensor not found");
 
@@ -117,30 +117,31 @@ void setup()
         canvasMain.drawString("SENSOR",0, 2*int(main_height/5));
         canvasMain.pushSprite(&M5.Lcd, 0, header_height);
         // stop forever: we cannot do anything
-        while (1);
+        while (1) {delay(1000);};
     }
     
-
-    // start sensor meaurements
-    report = CO2sensor.startMeasurements();
-    if (!report) 
+    // sensor initialization
+    success = CO2sensor.prepareMeasurements();
+    if (!success)
     {
-        ESP_LOGE(TAG, "Sensor start error");
+        ESP_LOGE(TAG, "Sensor prepare error");
 
         M5.Speaker.tone(740, 500);        
 
         canvasMain.clear(TFT_BLACK);
         canvasMain.setTextColor(TFT_RED);
-        canvasMain.drawString("ERROR",4, int(main_height/5));
+        canvasMain.drawString("ERROR",0, int(main_height/5));
         canvasMain.pushSprite(&M5.Lcd, 0, header_height);
         // stop forever: we cannot do anything
-        while (1);
-    }
-    
-	ESP_LOGI(TAG, "Sensor Init OK");
-    canvasHeader.fillSprite(TFT_NAVY);    
-    canvasHeader.drawString("%CO2",lcd_width/2-int(lcd_width/5), 5);
-    canvasHeader.pushSprite(&M5.Lcd, 0, 0);
+        while (1) {delay(1000);};
+    } else
+    {
+        canvasMain.clear(TFT_BLACK);
+        canvasMain.setTextColor(TFT_RED);
+        canvasMain.drawString(CO2sensor.getSensorName(),0, int(main_height/5));
+        canvasMain.pushSprite(&M5.Lcd, 0, header_height);
+        ESP_LOGE(TAG, "Sensor started");
+    } 
 }
 
 
@@ -151,31 +152,29 @@ void setup()
 void loop() 
 {
 
-    if ( CO2sensor.areDataReady() )
+
+    bool success = CO2sensor.getMeasurements();
+
+    if (success)
     {
         ESP_LOGI(TAG, "New measurement available");
         
         displayMainValue(co2percent);
         displayMAXvalue(co2percentMAX);
-
-    } else
-    {
-        // check if time since last measurement matches expected periodicity
-        uint32_t time_elapsed = CO2sensor.get_timeSinceLastSuccessfulMeasure_s();
-        if (time_elapsed > ACQ_TIMEOUT_S)
-        {
-            ESP_LOGE(TAG, "Timeout on valid acquisitions");
-            M5.Speaker.tone(200, 500);        
-            canvasMain.clear(TFT_BLACK);
-            canvasMain.setTextColor(TFT_RED);
-            canvasMain.drawString("ERROR",lcd_width/3, int(main_height/5));
-            canvasMain.pushSprite(&M5.Lcd, 0, header_height);
-        }
     }
 
+    uint32_t time_elapsed = CO2sensor.get_timeSinceLastSuccessfulMeasure_s();
+    if (time_elapsed > ACQ_TIMEOUT_S)
+    {
+        ESP_LOGE(TAG, "Global timeout on valid acquisitions");
+        M5.Speaker.tone(200, 500);        
+        canvasMain.clear(TFT_BLACK);
+        canvasMain.setTextColor(TFT_RED);
+        canvasMain.drawString("ERROR",0, int(main_height/5));
+        canvasMain.pushSprite(&M5.Lcd, 0, header_height);
+    }
 
-   // one sec delay required between measurements
-   delay(1000);
+    delay(5000);
 }
 
 

@@ -11,6 +11,7 @@
 #include <M5Unified.h>
 // M5 sensors
 #include "M5UnitENV.h"
+#include "I2C_Class.h"
 
 #include "CO2sensGen.h"
 
@@ -38,65 +39,135 @@ CO2sensGen::CO2sensGen() {firstValidData = false;}
  *  @brief  Sensor initialization.
  *  Setups the I2C for communication over grove link with appropriate I2C address.
  *  Checks hardware and detects a valid sensor
+ * To be called after power up
  
  *  @return True if sensor found on I2C, False if something went wrong!
  */
 boolean CO2sensGen::begin()
 {  
-  bool state = co2sensor.begin(&Wire, SCD4X_I2C_ADDR, GPIO_SDA_EXT, GPIO_SCL_EXT, 400000U);
+  // setup I2C and tryCnt to read serial number;  
+  bool state = co2sensor.begin(&Wire, SCD4X_I2C_ADDR, GPIO_SDA_EXT, GPIO_SCL_EXT, 400000U, false, false, true, false);
   
   return (state);
 }
   
 
-bool CO2sensGen::startMeasurements()
-{
-  uint16_t error;
-  bool success = true;
-  firstValidData = false;
+bool CO2sensGen::prepareMeasurements()
+{    
+    // wakeup sensor
+    bool success = co2sensor.sendCommand(SCD4x_COMMAND_WAKEUP);
+    if (success)
+    {
+      ESP_LOGI(TAG, "Wakeup sent");
+      delay(30);
 
-  stop potentially previously started measurement
-  error = co2sensor.stopPeriodicMeasurement();
-  if (error) 
-  {
-      success =false;
-      ESP_LOGE(TAG, "Error trying to execute stopPeriodicMeasurement()");
-  } else
-  {
-      // Start Measurement
-      error = co2sensor.startPeriodicMeasurement();
-      if (error) 
+      success = co2sensor.stopPeriodicMeasurement();
+      if (success)
       {
-          success =false;
-          ESP_LOGE(TAG, "Error trying to start startPeriodicMeasurement()");
+          ESP_LOGI(TAG, "measurements stopped");
+
+          success = co2sensor.reInit();
+          if (success)
+          {
+              ESP_LOGI(TAG, "reinit sent: request serial");
+
+              // get serial to be sure of sensor existance
+              char serialNumber[13];  // Serial number is 12 digits plus trailing NULL
+              success = co2sensor.getSerialNumber(serialNumber); 
+              if (success)
+              {
+                  ESP_LOGI(TAG, "serial = %s", serialNumber);
+                  // get type                  
+                  scd4x_sensor_type_e type;
+                  success = co2sensor.getFeatureSetVersion(&type);
+                  
+
+                  if (success)
+                  {                      
+                      sensorType = static_cast<int>(type);                      
+                      ESP_LOGI(TAG, "sensor_type = %s", sensor_type_dict.at(sensorType) );
+                  }
+              }
+          }
       }
-  }
-
-  return success;
+    }
+    return (success);
 }
 
 
-
-bool CO2sensGen::areDataReady()
+const char* CO2sensGen::getSensorName()
 {
-  bool success = co2sensor.update();
-
-  if (success)
-  {
-      firstValidData = true;
-      uint32_t lastSuccessTimestamp = millis();
-
-      // update measurements ------------------
-      CO2ppm = co2sensor.getCO2();
-      tempDegC = co2sensor.getTemperature();
-      humidityPerCent = co2sensor.getHumidity();
-
-      ESP_LOGI(TAG, "CO2:%d ppm - Temp:%f degC - RH:%f",CO2ppm, tempDegC, humidityPerCent);
-
-     // update calculations
-     CO2calcUpdates();
-  }
+  if (sensorType <= 2)
+      return (sensor_type_dict.at(sensorType));
+  else
+      return("");
 }
+
+
+// get measurements: requests up to 60 times every 100ms
+bool CO2sensGen::getMeasurements()
+{  
+  firstValidData = false;
+  bool meas_achieved = false;
+  bool success = false;
+  //success = co2sensor.sendCommand(SCD4x_COMMAND_WAKEUP);
+  //if (success)
+  {
+      //ESP_LOGI(TAG, "Wakeup sent");
+
+      // request measurement now
+      success = co2sensor.measureSingleShot();
+      if (success)
+      {
+        ESP_LOGI(TAG, "mesurement requested");
+        // it can take up to 5s to get the response...
+               
+        bool data_rdy = false;
+        uint8_t tryCnt = 0;
+        for (tryCnt = 0; (tryCnt < 60) && (!data_rdy) ; tryCnt++)
+        {
+            data_rdy = co2sensor.getDataReadyStatus();
+            if (!data_rdy) ESP_LOGI(TAG, "data NOT ready");
+            delay(100);
+        }
+
+        if (data_rdy)
+        {
+            ESP_LOGI(TAG, "data ready after %d attempts", tryCnt); 
+            success = co2sensor.readMeasurement();
+            if (success)
+            {
+                meas_achieved =  true;               
+                firstValidData = true;
+                lastSuccessTimestamp = millis();
+
+                CO2ppm = co2sensor.getCO2();
+                humidityPerCent = co2sensor.getHumidity();
+                tempDegC = co2sensor.getTemperature();
+
+                CO2calcUpdates();
+
+                ESP_LOGI(TAG, "CO2:%d ppm - Temp:%f degC - RH:%f)", CO2ppm, tempDegC, humidityPerCent);
+            } else
+            {
+                ESP_LOGE(TAG, "1st Measurements after power up failed");
+            } // end measurements read
+        } else
+        {
+            ESP_LOGE(TAG, "Data ready time out on 1st request after power up");                
+        } // end data ready        
+         
+      } // end command
+      else
+      {
+          ESP_LOGE(TAG, "Request measure failed");
+      }
+
+  }
+  
+  return (meas_achieved);
+}
+
 
 
 void CO2sensGen::CO2calcUpdates()

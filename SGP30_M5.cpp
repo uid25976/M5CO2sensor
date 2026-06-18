@@ -81,9 +81,9 @@ boolean SGP30_M5::begin(boolean initSensor)
 
 bool SGP30_M5::measureCO2()
 {
-    bool report = IAQmeasure();
+    bool success = IAQmeasure();
 
-    if (true == report)
+    if (true == success)
     {
         CO2percent = (float)this->eCO2/10000;
 
@@ -94,7 +94,7 @@ bool SGP30_M5::measureCO2()
 
     }
 
-    return report;
+    return success;
 }
 
 
@@ -120,9 +120,9 @@ bool SGP30_M5::softReset()
 {
 	uint8_t command = 0x06;
 	Wire.beginTransmission(0x00);
-	bool report = Wire.write(&command, 1);     
+	bool success = Wire.write(&command, 1);     
 	Wire.endTransmission(true);
-  return report;
+  return success;
 }
 
 
