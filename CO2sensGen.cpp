@@ -4,8 +4,7 @@
  * @author aprocha46
  * @copyright Copyright (c) 2026 aprocha46
  * @license MIT
- *
- * @TODO : set SCD41 + set delat temp + set altitude
+ * 
  */
 #include "Arduino.h"
 #include <M5Unified.h>
@@ -79,13 +78,20 @@ bool CO2sensGen::prepareMeasurements()
                   ESP_LOGI(TAG, "serial = %s", serialNumber);
                   // get type                  
                   scd4x_sensor_type_e type;
-                  success = co2sensor.getFeatureSetVersion(&type);
-                  
-
+                  success = co2sensor.getFeatureSetVersion(&type);                  
                   if (success)
                   {                      
+                      // we set sensor type in the driver because getFeatureSetVersion() does not do it !
+                      co2sensor.setSensorType(type);
                       sensorType = static_cast<int>(type);                      
                       ESP_LOGI(TAG, "sensor_type = %s", sensor_type_dict.at(sensorType) );
+
+                      // set a default altitude to improve accuracy
+                      success = co2sensor.setSensorAltitude(DEFAULT_ALTITUDE);
+                      if (!success)
+                      {
+                          ESP_LOGE(TAG, "failed to set altitude");
+                      }
                   }
               }
           }
@@ -110,25 +116,24 @@ bool CO2sensGen::getMeasurements()
   firstValidData = false;
   bool meas_achieved = false;
   bool success = false;
-  //success = co2sensor.sendCommand(SCD4x_COMMAND_WAKEUP);
-  //if (success)
-  {
-      //ESP_LOGI(TAG, "Wakeup sent");
-
+  
       // request measurement now
       success = co2sensor.measureSingleShot();
       if (success)
       {
-        ESP_LOGI(TAG, "mesurement requested");
+        ESP_LOGI(TAG, "measureSingleShot() OK");
         // it can take up to 5s to get the response...
                
         bool data_rdy = false;
         uint8_t tryCnt = 0;
-        for (tryCnt = 0; (tryCnt < 60) && (!data_rdy) ; tryCnt++)
+        for (tryCnt = 0; (tryCnt < 10) && (!data_rdy) ; tryCnt++)
         {
             data_rdy = co2sensor.getDataReadyStatus();
-            if (!data_rdy) ESP_LOGI(TAG, "data NOT ready");
-            delay(100);
+            if (!data_rdy) {
+               ESP_LOGI(TAG, "data NOT ready");               
+            }
+            // delay must be higher than 500ms if you remove the ESP_LOGI(): to be clarified
+            delay(600);
         }
 
         if (data_rdy)
@@ -147,7 +152,7 @@ bool CO2sensGen::getMeasurements()
 
                 CO2calcUpdates();
 
-                ESP_LOGI(TAG, "CO2:%d ppm - Temp:%f degC - RH:%f)", CO2ppm, tempDegC, humidityPerCent);
+                ESP_LOGI(TAG, "CO2:%d ppm - Temp:%.1f degC - RH:%.1f)", CO2ppm, tempDegC, humidityPerCent);
             } else
             {
                 ESP_LOGE(TAG, "1st Measurements after power up failed");
@@ -160,10 +165,9 @@ bool CO2sensGen::getMeasurements()
       } // end command
       else
       {
-          ESP_LOGE(TAG, "Request measure failed");
+          ESP_LOGE(TAG, "measureSingleShot() failed");
       }
-
-  }
+  
   
   return (meas_achieved);
 }
@@ -172,7 +176,7 @@ bool CO2sensGen::getMeasurements()
 
 void CO2sensGen::CO2calcUpdates()
 {
-    CO2percent = static_cast<uint32_t>(CO2ppm/10000);
+    CO2percent = static_cast<float>(CO2ppm)/10000;
     
     // update CO2 MAX 
     if (CO2percent > CO2max)
@@ -189,7 +193,6 @@ uint32_t CO2sensGen::get_timeSinceLastSuccessfulMeasure_s()
 {
   uint32_t time_s = 0XFFFFFFFF;
   
-
   if(firstValidData)
   {
     uint32_t deltaT_ms = millis() - lastSuccessTimestamp;
@@ -215,6 +218,11 @@ float CO2sensGen::getterCO2filtered()
 
 float CO2sensGen::getterCO2max()
 {
+  ESP_LOGI(TAG, "CO2 max returned: %f", CO2max);
   return CO2max;
 }
 
+void CO2sensGen::resetCO2max()
+{  
+  CO2max = 0;  
+}
