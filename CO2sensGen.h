@@ -18,7 +18,9 @@
 #include <map>
 
 
-// missing command in the driver for SCD41
+static const float sensorCO2capability = 4; /**< maximum CO2 percentage that he sensor is able to return */
+
+// missing command in the driver for SCD41 
 #define SCD4x_COMMAND_WAKEUP       0x36F6  /**< Command to wake up the sensor (execution time: 30ms) */
 #define SCD4x_COMMAND_POWEROFF		 0x36E0  /**< Command to power down the sensor (currently unused)  */
 /**
@@ -65,6 +67,13 @@ public:
 	 * @return true if measurement is successful, false otherwise
 	 */
 	bool getMeasurements();
+
+	/*!
+	 * @brief sensor range
+	 * @return max CO2 percentage that the sensor can measure
+	 */
+  float getterSensorRangeCO2percent();
+
 
 	/*!
 	 * @brief Gets the current CO2 concentration in percent

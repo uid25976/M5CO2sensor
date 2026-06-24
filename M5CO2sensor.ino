@@ -25,6 +25,8 @@ void displayMainValue(float fval);
 void displayMAXvalue(float fval);
 void canvasMain_drawVirtualLED(bool on_off);
 void buttonPollingTask(void *pvParameters);
+void drawCO2Plot();
+void display_InitRelativeDimensions(int lcd_width, int lcd_height);
 
 
 // configuration constants ---------------------------------
@@ -38,13 +40,46 @@ static const float thres2 = 0.7f;   /**< Warning level threshold (< 0.7%) */
 static const float thres3 = 3.0f;   /**< Danger level threshold (< 3.0%, near sensor max of 4%) */
 
 // display configuration ----------------------------------
-const int header_height = 35;     /**< Header area height in pixels */
-const int footer_height = 45;     /**< Footer area height in pixels */
-static const uint8_t LED_Size = 10; /**< Virtual LED indicator size in pixels */
-static int16_t lcd_width = 0;
-static int16_t lcd_height = 0;
 
+
+static const uint8_t LED_Size = 10; /**< Virtual LED indicator size in pixels */
+
+// plot configuration -------------------------------------
+#define BUFFER_SIZE 50               /**< Number of values to store and display */
+#define DOT_SIZE 2                    /**< Size of plot dots in pixels */
+
+// display configuration ----------------------------------
+// display is split into a header; main and footer each defined as a canvas or sprite
+// these 3 fields have the LCD width (single column)
+//header ---------------
+static const int header_height = 35;     /**< Header area height in pixels */
+static int headerText_Xoff;       /**< Header text offset */
+static int headerText_Yoff;
+
+// Main ---------------
 static int main_height;
+
+// footer -------------
+static const int footerText_Xoff = 10;
+static const int footerText_Yoff = 5;
+static const int footer_height = 45;     /**< Footer area height in pixels */
+static int footer_window_Yoff;
+
+// Runtime plot dimensions and location
+static int Plot_Xoffset = 0;              /**< X coordinate for plot origin */
+static int Plot_Yoffset = 0;              /**< Y coordinate for plot origin */
+static int Plot_width = 0;                /**< Width of the plot area */
+static int Plot_height = 0;               /**< Height of the plot area */
+
+static int lcd_width = 0;
+static int lcd_height = 0;
+static int virtualLED_X_LCDoffset ;
+static int  virtualLED_Y_Mainoffset ;
+
+static int CO2val_lcd_X_LCDoffset;
+static int CO2val_lcd_Y_MainOffset;
+static int CO2val_next_lcd_Y_MainOffset;
+ 
 
 M5Canvas canvasHeader(&M5.Lcd);
 M5Canvas canvasMain(&M5.Lcd);
@@ -55,6 +90,11 @@ M5Canvas canvasFooter(&M5.Lcd);
 static bool isFirstMeasurement = true;
 // sensor object
 CO2sensGen CO2sensor;
+
+// circular buffer for CO2 trend plotting
+static float co2Buffer[BUFFER_SIZE] = {0}; /**< Circular buffer for CO2 values */
+static uint8_t bufferIndex = 0;            /**< Current position in circular buffer : will behave like an oscilloscope: when buffer size reached will restart at 0 */
+static bool bufferFull = false;            /**< Flag to detect that the whole buffer has been filled */
 
 
 // Task handle for the button polling task
@@ -88,17 +128,21 @@ void setup()
 
     // Init display --------------------------------
     M5.Lcd.clear(TFT_BLACK);
+    // get display size 
     lcd_width = M5.Lcd.width();
     lcd_height = M5.Lcd.height();
-
-    main_height = lcd_height-(header_height + footer_height);
+    // compute display locations accordingly
+    
+    display_InitRelativeDimensions(lcd_width, lcd_height);
+ 
     
     // create header ------------------------------
     canvasHeader.createSprite(lcd_width, header_height);
     canvasHeader.fillSprite(TFT_NAVY);    
     canvasHeader.setTextSize(3);
     canvasHeader.setTextColor(TFT_YELLOW);  
-    canvasHeader.drawString("INIT",lcd_width/2-int(lcd_width/5), 5);
+    canvasHeader.drawString("INIT",headerText_Xoff, headerText_Yoff);
+   
     canvasHeader.pushSprite(&M5.Lcd, 0, 0);
 	
 
@@ -107,15 +151,16 @@ void setup()
     canvasFooter.fillSprite(TFT_DARKGREY);    
     canvasFooter.setTextSize(4);
     canvasFooter.setTextColor(TFT_BLACK);  
-    canvasFooter.drawString("MAX: ",1, 5);
-    canvasFooter.pushSprite(&M5.Lcd, 0, lcd_height-footer_height);
+    canvasFooter.drawString("MAX: ",footerText_Xoff, footerText_Yoff);
+    canvasFooter.pushSprite(&M5.Lcd, 0, footer_window_Yoff);
+    
 
     // create main ------------------------------
     canvasMain.createSprite(lcd_width, main_height);
     canvasMain.fillSprite(TFT_BLACK);    
     canvasMain.setTextSize(4);
     canvasMain.setTextColor(TFT_WHITE);  
-    canvasMain.drawString("WAIT",lcd_width/3, int(main_height/5));
+    canvasMain.drawString("WAIT",CO2val_lcd_X_LCDoffset, CO2val_lcd_Y_MainOffset);
     canvasMain.pushSprite(&M5.Lcd, 0, header_height);
         
 	ESP_LOGI(TAG, "Init sensor started");
@@ -130,8 +175,9 @@ void setup()
 
         canvasMain.clear(TFT_BLACK);
         canvasMain.setTextColor(TFT_RED);
-        canvasMain.drawString("NO",lcd_width/3, int(main_height/5));
-        canvasMain.drawString("SENSOR",0, 2*int(main_height/5));
+        canvasMain.drawString("NO",CO2val_lcd_X_LCDoffset, CO2val_lcd_Y_MainOffset);
+        canvasMain.drawString("SENSOR",0, CO2val_next_lcd_Y_MainOffset);
+        
         canvasMain.pushSprite(&M5.Lcd, 0, header_height);
         // stop forever: we cannot do anything
         while (1) {delay(1000);};
@@ -147,20 +193,20 @@ void setup()
 
         canvasMain.clear(TFT_BLACK);
         canvasMain.setTextColor(TFT_RED);
-        canvasMain.drawString("ERROR",0, int(main_height/5));
+        canvasMain.drawString("ERROR",CO2val_lcd_X_LCDoffset, CO2val_lcd_Y_MainOffset);
         canvasMain.pushSprite(&M5.Lcd, 0, header_height);
         // stop forever: we cannot do anything
         while (1) {delay(1000);};
     } else
     {
         canvasHeader.clear(TFT_NAVY);            
-        canvasHeader.drawString("READY",lcd_width/2-int(lcd_width/3), 5);
+        canvasHeader.drawString("READY",headerText_Xoff, headerText_Yoff);
         canvasHeader.pushSprite(&M5.Lcd, 0, 0);
 
         canvasMain.clear(TFT_BLACK);
         canvasMain.setTextColor(TFT_NAVY);
         // display sensor name while waiting first measurement
-        canvasMain.drawString(CO2sensor.getSensorName(),15, int(main_height/5));
+        canvasMain.drawString(CO2sensor.getSensorName(),CO2val_lcd_X_LCDoffset - 10, CO2val_lcd_Y_MainOffset);
         // display SW vers
         canvasMain.drawString(sw_vers_str, 35, 2*int(main_height/5));
 
@@ -195,7 +241,7 @@ void loop()
             isFirstMeasurement = false;
             // change header
             canvasHeader.clear(TFT_NAVY);            
-            canvasHeader.drawString("%CO2",lcd_width/2-int(lcd_width/5), 5);                        
+            canvasHeader.drawString("%CO2",headerText_Xoff, headerText_Yoff);                        
             canvasHeader.pushSprite(&M5.Lcd, 0, 0);
         }
 
@@ -219,7 +265,7 @@ void loop()
             M5.Speaker.tone(200, 500);        
             canvasMain.clear(TFT_BLACK);
             canvasMain.setTextColor(TFT_RED);
-            canvasMain.drawString("ERROR",0, int(main_height/5));
+            canvasMain.drawString("ERROR",CO2val_lcd_X_LCDoffset, CO2val_lcd_Y_MainOffset);
             canvasMain.pushSprite(&M5.Lcd, 0, header_height);
             // wait and reboot after delay
             delay(3000);
@@ -234,7 +280,7 @@ void loop()
             M5.Speaker.tone(200, 500);        
             canvasMain.clear(TFT_BLACK);
             canvasMain.setTextColor(TFT_RED);
-            canvasMain.drawString("ERROR",0, int(main_height/5));
+            canvasMain.drawString("ERROR",CO2val_lcd_X_LCDoffset, CO2val_lcd_Y_MainOffset);
             canvasMain.pushSprite(&M5.Lcd, 0, header_height);
             // wait and reboot after delay
             delay(3000);
@@ -261,15 +307,16 @@ void loop()
  * @details Visual indicator that shows when data is being updated
  */
 void canvasMain_drawVirtualLED(bool on_off)
-{
+{       
     if (on_off)
     {
-        canvasMain.fillCircle(lcd_width/2, 4*int(main_height/5), LED_Size, TFT_GREEN);   
+        canvasMain.fillCircle(virtualLED_X_LCDoffset, virtualLED_Y_Mainoffset, LED_Size, TFT_GREEN);   
     } else
     {
-        canvasMain.fillCircle(lcd_width/2, 4*int(main_height/5), LED_Size, TFT_BLACK);
+        canvasMain.fillCircle(virtualLED_X_LCDoffset, virtualLED_Y_Mainoffset, LED_Size, TFT_BLACK);
     }
 }
+
 
 
 /**
@@ -294,18 +341,38 @@ void displayMainValue(float fval)
        canvasMain.setTextColor(TFT_ORANGE);
     } else if (fval < thres3)
     {
-        c.setTextColor(TFT_PURPLE);
+        canvasMain.setTextColor(TFT_PURPLE);
     } else 
     {
         canvasMain.setTextColor(TFT_RED);
         M5.Speaker.tone(740, 700);  // audible warning
     }
     
+    // update circular buffer to store last data 
+    co2Buffer[bufferIndex] = fval;
+    // update pointer
+    if (bufferIndex == (BUFFER_SIZE - 1))
+    {
+        bufferFull = true;  // buffer is now full
+        bufferIndex = 0;
+    } else
+    {
+        bufferIndex++;
+    }         
+    
     // display CO2 value
-    canvasMain.drawFloat(fval, nb_decimals, lcd_width/4, int(main_height/5));
+    canvasMain.drawFloat(fval, nb_decimals,CO2val_lcd_X_LCDoffset, CO2val_lcd_Y_MainOffset);
+    
+    // draw CO2 trend plot
+    drawCO2Plot();
+    
     canvasMain_drawVirtualLED(true);  // update indicator
     canvasMain.pushSprite(&M5.Lcd, 0, header_height);
 }
+
+
+
+
 
 
 void displayMAXvalue(float fval)
@@ -315,12 +382,88 @@ void displayMAXvalue(float fval)
     canvasFooter.setTextColor(TFT_BLACK);  
     canvasFooter.clear(TFT_DARKGREY);
 
-
     // value, nb decimals, X offset, Y offset
-    canvasFooter.drawFloat(fval, 1, int(lcd_width/3), 5);
-    canvasFooter.pushSprite(&M5.Lcd, 0, (lcd_height-footer_height) );
+    canvasFooter.drawFloat(fval, 1, footerText_Xoff, footerText_Yoff);
+    canvasFooter.pushSprite(&M5.Lcd, 0, footer_window_Yoff );
 }
 
+
+
+/**
+ * @brief Draws the CO2 trend plot using circular buffer data
+ * @details Renders a plot showing the last 50 CO2 measurements with proper scaling
+ * and axis lines. Uses circles to represent data points.
+ */
+void drawCO2Plot()
+{   
+    // Draw plot axis
+    canvasMain.drawLine(Plot_Xoffset, Plot_Yoffset, Plot_Xoffset + Plot_width, Plot_Yoffset, TFT_WHITE); // X axis
+    canvasMain.drawLine(Plot_Xoffset, Plot_Yoffset - Plot_height, Plot_Xoffset, Plot_Yoffset, TFT_WHITE); // Y axis
+    
+    // Calculate scaling factors
+    float xScale = Plot_width / (BUFFER_SIZE - 1);
+    float yScale = Plot_width / CO2sensor.getterSensorRangeCO2percent(); // max CO2 range (0-4%)
+    
+    // draw no more than samples accumulated
+    // Note that bufferFull is pointing to the future value, so we
+    // use 'bufferIndex' rather than 'bufferIndex + 1' to count the number of acquired samples
+    int nb_samples = (bufferFull  == true)? BUFFER_SIZE : bufferIndex;
+
+    // Draw data points
+    for (uint8_t i = 0; i < nb_samples; i++) 
+    {               
+        // Calculate position
+        float co2Value = co2Buffer[i];
+        
+        int x = Plot_Xoffset + i * xScale;
+        int y = Plot_Yoffset - co2Value * yScale;
+        
+        // Draw dot: last acquired sample will be in a different color (refer to previous note)
+        if( (bufferIndex > 1) && (i == (bufferIndex - 1)) )
+        {
+            canvasMain.fillCircle(x, y, DOT_SIZE*2, TFT_ORANGE);
+        } else
+        {
+            canvasMain.fillCircle(x, y, DOT_SIZE, TFT_GREEN);
+        }        
+    }   // end loop on samples for display
+}
+
+
+
+void display_InitRelativeDimensions(int lcd_width, int lcd_height)
+ {
+    float f_lcd_width = static_cast<float>(lcd_width);    
+   
+
+    // header ----------
+    headerText_Xoff = static_cast<int>(f_lcd_width/2-int(f_lcd_width/5) );
+    headerText_Yoff = 5;
+
+    // main ------------
+    main_height = lcd_height-(header_height + footer_height);
+    float f_main_height = static_cast<float>(main_height);
+
+    
+    // CO2 value location
+    CO2val_lcd_X_LCDoffset = static_cast<int>(f_lcd_width/4);
+    CO2val_lcd_Y_MainOffset = static_cast<int>(f_main_height/5);    
+    CO2val_next_lcd_Y_MainOffset = 2*int(f_main_height/5);
+
+    // display plot       
+    // Calculate plot dimensions
+    Plot_Yoffset = static_cast<int>(3.5 * f_main_height/5);
+    Plot_width = lcd_width;
+    Plot_height = static_cast<int>(f_main_height / 5);
+
+    // virtual LED coordinates
+    virtualLED_X_LCDoffset = static_cast<int>(f_lcd_width/2);
+    virtualLED_Y_Mainoffset = static_cast<int>(4.2 * f_main_height/5);
+
+
+    // footer -----------
+    footer_window_Yoff = lcd_height-footer_height;
+ }
 
 
 /**
@@ -349,8 +492,8 @@ void buttonPollingTask(void *pvParameters) {
         canvasFooter.clear(TFT_DARKGREY);
 
         // value, nb decimals, X offset, Y offset
-        canvasFooter.drawFloat(0, 1, int(lcd_width/3), 5);
-        canvasFooter.pushSprite(&M5.Lcd, 0, (lcd_height-footer_height) );
+        canvasFooter.drawFloat(0, 1, footerText_Xoff, footerText_Yoff);
+        canvasFooter.pushSprite(&M5.Lcd, 0, footer_window_Yoff );
     }
 
     // Delay for 200ms (periodic)

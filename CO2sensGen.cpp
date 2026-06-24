@@ -25,6 +25,7 @@ static const  char* TAG = "CO2_GEN";
 SCD4X co2sensor;
 
 
+
 /*!
  *  @brief  default constructor
  * to prevent mis interpretation of data the valid flag is set to false
@@ -172,6 +173,11 @@ bool CO2sensGen::getMeasurements()
   return (meas_achieved);
 }
 
+
+float CO2sensGen::getterSensorRangeCO2percent()
+{
+    return sensorCO2capability;
+}
 
 
 void CO2sensGen::CO2calcUpdates()
