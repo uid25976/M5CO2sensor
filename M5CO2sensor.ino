@@ -2,7 +2,7 @@
  * CO2 sensor using a M5stick plus and SGP30 sensor
  * Board library : ESP32 3.3.10
  * Libraries: requires M5StickCPlus2 1.0.1 
- *            - M5Unified 0.2.7 - M5Utility 0.0.9
+ * 
  *
  * NOTE: main button allows to reset the max recorded CO2 value
  * There is a 100ms task to monitor the main button.
@@ -10,11 +10,9 @@
  * History:
  * 2025-12-27: v 0.1 first version based on SCP30: discared because sensor does not work in caves.
  * 2026-06-22: V 0.9 first working version based on SCD41
- * @TODO add buzzer
- * @TODO move UI to a separate class
- * @TODO add detection of stable MAX
- * @TODO: add MAX detection + reset using button
- * @TODO: add low power
+ * @TODO display vers
+ * @TODO display trend
+ * @TODO add low power
  *
  */
 #include <M5Unified.h>
