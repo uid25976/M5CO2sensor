@@ -1,63 +1,48 @@
 /**
- * CO2 sensor using a M5stick plus and SGP30 sensor
+ * @brief CO2 sensor application using M5Stick Plus and SCD41 sensor
  * Board library : ESP32 3.3.10
  * Libraries: requires M5StickCPlus2 1.0.1 
- * 
  *
  * NOTE: main button allows to reset the max recorded CO2 value
  * There is a 100ms task to monitor the main button.
  *  
  * History:
- * 2025-12-27: v 0.1 first version based on SCP30: discared because sensor does not work in caves.
- * 2026-06-22: V 0.9 first working version based on SCD41
+ * 2025-12-27: v0.1 - Initial version using SGP30 sensor (discarded - unsuitable for caves)
+ * 2026-06-22: v0.9 - First working version using SCD41 sensor
  * @TODO display vers
  * @TODO display trend
  * @TODO add low power
  *
  */
 #include <M5Unified.h>
-#include <M5StickCPlus2.h>
-
-
 // ESP32 debug origin 
 static const  char* TAG = "MAIN";
-
+// sensor insterface
 #include "CO2sensGen.h"
 
-// proto ----------------------------------------------------
+// function prototypes ------------------------------------
 void displayMainValue(float fval);
 void displayMAXvalue(float fval);
 void canvasMain_drawVirtualLED(bool on_off);
 void buttonPollingTask(void *pvParameters);
 
 
-// customize ------------------------------------------------
-#define ACQ_TIMEOUT_S (uint32_t)300u
+// configuration constants ---------------------------------
+static const char* sw_vers_str = "0.9";   /**< software version */
+#define ACQ_TIMEOUT_S (uint32_t)300u /**< Acquisition timeout in seconds (5 minutes)*/
 
-// constant --------------------------------------------------
+// CO2 safety thresholds ------------------------------------
+// @brief CO2 concentration thresholds for visual warnings
+static const float thres1 = 0.2f;   /**< Safe level threshold (< 0.2%) */
+static const float thres2 = 0.7f;   /**< Warning level threshold (< 0.7%) */
+static const float thres3 = 3.0f;   /**< Danger level threshold (< 3.0%, near sensor max of 4%) */
 
-// CO2 thresholds to notify level of danger 
-static const float thres1 = 0.2;
-static const float thres2 = 0.7;
-static const float thres3 = 3; // warning must be < 4 with the SCD41 sensor as it is its max value !
-
-// display settings
-const int header_height = 35;
-const int footer_height = 45;
-// LED like display
-static const uint8_t LED_Size = 10;
-
-
-// variables ------------------------------------------------
-// first measurement
-static bool isFirstMeasurement = true;
-// sensor object
-CO2sensGen CO2sensor;
-static uint32_t last_millis = 0;
+// display configuration ----------------------------------
+const int header_height = 35;     /**< Header area height in pixels */
+const int footer_height = 45;     /**< Footer area height in pixels */
+static const uint8_t LED_Size = 10; /**< Virtual LED indicator size in pixels */
 static int16_t lcd_width = 0;
 static int16_t lcd_height = 0;
-static float co2percent = 0;
-static float co2percentMAX = 0;
 
 static int main_height;
 
@@ -65,12 +50,22 @@ M5Canvas canvasHeader(&M5.Lcd);
 M5Canvas canvasMain(&M5.Lcd);
 M5Canvas canvasFooter(&M5.Lcd);
 
+// variables ------------------------------------------------
+// first measurement flag
+static bool isFirstMeasurement = true;
+// sensor object
+CO2sensGen CO2sensor;
+
+
 // Task handle for the button polling task
 TaskHandle_t buttonTaskHandle = NULL;
 
 
-// ======================== INIT =============================
-// ===========================================================
+/**
+ * @brief Initialization function - runs once at startup
+ * @details Sets up the M5Stick device, initializes displays, 
+ * configures the CO2 sensor, and creates the button monitoring task
+ */
 void setup() 
 {
     bool success = false;
@@ -104,7 +99,7 @@ void setup()
     canvasHeader.setTextSize(3);
     canvasHeader.setTextColor(TFT_YELLOW);  
     canvasHeader.drawString("INIT",lcd_width/2-int(lcd_width/5), 5);
-    canvasHeader.pushSprite(&M5.Lcd, 0, 0);//"&M5
+    canvasHeader.pushSprite(&M5.Lcd, 0, 0);
 	
 
     // create footer ------------------------------
@@ -160,11 +155,15 @@ void setup()
     {
         canvasHeader.clear(TFT_NAVY);            
         canvasHeader.drawString("READY",lcd_width/2-int(lcd_width/3), 5);
-        canvasHeader.pushSprite(&M5.Lcd, 0, 0);//"&M5
+        canvasHeader.pushSprite(&M5.Lcd, 0, 0);
 
         canvasMain.clear(TFT_BLACK);
-        canvasMain.setTextColor(TFT_RED);
-        canvasMain.drawString(CO2sensor.getSensorName(),0, int(main_height/5));
+        canvasMain.setTextColor(TFT_NAVY);
+        // display sensor name while waiting first measurement
+        canvasMain.drawString(CO2sensor.getSensorName(),15, int(main_height/5));
+        // display SW vers
+        canvasMain.drawString(sw_vers_str, 35, 2*int(main_height/5));
+
         canvasMain.pushSprite(&M5.Lcd, 0, header_height);
         ESP_LOGI(TAG, "Sensor started");
     } 
@@ -173,8 +172,11 @@ void setup()
 
 
 
-// ======================== LOOP =============================
-// ===========================================================
+/**
+ * @brief Main loop - runs repeatedly after setup
+ * @details Performs CO2 measurements, updates the display,
+ * monitors for errors, and handles timeout conditions
+ */
 void loop() 
 {
     uint32_t nb_failed = 0;
@@ -194,11 +196,11 @@ void loop()
             // change header
             canvasHeader.clear(TFT_NAVY);            
             canvasHeader.drawString("%CO2",lcd_width/2-int(lcd_width/5), 5);                        
-            canvasHeader.pushSprite(&M5.Lcd, 0, 0);//"&M5
+            canvasHeader.pushSprite(&M5.Lcd, 0, 0);
         }
 
         displayMainValue(CO2sensor.getterCO2percent());
-        
+
         displayMAXvalue(CO2sensor.getterCO2max());
         
         nb_failed = 0;
@@ -253,7 +255,11 @@ void loop()
 
 
 
-// utilities ---------------------------------------------
+/**
+ * @brief Draws or erases the virtual LED indicator
+ * @param on_off true to draw LED, false to erase it
+ * @details Visual indicator that shows when data is being updated
+ */
 void canvasMain_drawVirtualLED(bool on_off)
 {
     if (on_off)
@@ -266,32 +272,38 @@ void canvasMain_drawVirtualLED(bool on_off)
 }
 
 
+/**
+ * @brief Updates the main display with current CO2 value
+ * @param fval CO2 concentration in percent to display
+ * @details Shows CO2 value with color coding based on safety thresholds
+ * and triggers audible warning for dangerous levels
+ */
 void displayMainValue(float fval)
 {
     int nb_decimals = 1;
-    // update main panel ---------------------
+    // update main panel
     canvasMain.clear(TFT_BLACK);
 
-    // customize color according to the risk 
+    // color coding according to safety thresholds
     if (fval < thres1)
     {
-        nb_decimals = 2;
+        nb_decimals = 2;  // more precision for low values
         canvasMain.setTextColor(TFT_GREEN);
     } else if (fval < thres2)
     {
        canvasMain.setTextColor(TFT_ORANGE);
     } else if (fval < thres3)
     {
-        canvasMain.setTextColor(TFT_PURPLE);
+        c.setTextColor(TFT_PURPLE);
     } else 
     {
         canvasMain.setTextColor(TFT_RED);
-        M5.Speaker.tone(740, 700);
+        M5.Speaker.tone(740, 700);  // audible warning
     }
-    // value, nb decimals, X offset, Y offset
+    
+    // display CO2 value
     canvasMain.drawFloat(fval, nb_decimals, lcd_width/4, int(main_height/5));
-    // add temporary virtual LED to notify the update
-    canvasMain_drawVirtualLED(true);
+    canvasMain_drawVirtualLED(true);  // update indicator
     canvasMain.pushSprite(&M5.Lcd, 0, header_height);
 }
 
@@ -303,7 +315,7 @@ void displayMAXvalue(float fval)
     canvasFooter.setTextColor(TFT_BLACK);  
     canvasFooter.clear(TFT_DARKGREY);
 
-    //canvasFooter.drawString("MAX: ",1, 5);
+
     // value, nb decimals, X offset, Y offset
     canvasFooter.drawFloat(fval, 1, int(lcd_width/3), 5);
     canvasFooter.pushSprite(&M5.Lcd, 0, (lcd_height-footer_height) );
@@ -311,7 +323,12 @@ void displayMAXvalue(float fval)
 
 
 
-// Function to check button A and call startMeasInfo() if pressed
+/**
+ * @brief Background task for monitoring the main button
+ * @param pvParameters Task parameters (unused)
+ * @details Runs every 200ms to check if Button A was pressed
+ * and resets the maximum CO2 value when pressed
+ */
 void buttonPollingTask(void *pvParameters) {
   (void)pvParameters; // Unused parameter
 

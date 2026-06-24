@@ -184,8 +184,7 @@ void CO2sensGen::CO2calcUpdates()
         CO2max = CO2percent;
     }
 
-    // filter CO2 to smooth
-    CO2filtered = alpha * CO2percent + (1.0f - alpha) * CO2filtered;
+
 }
 
 
@@ -211,14 +210,11 @@ float CO2sensGen::getterCO2percent()
 }
 
 
-float CO2sensGen::getterCO2filtered()
-{
-  return CO2filtered;
-}
+
 
 float CO2sensGen::getterCO2max()
 {
-  ESP_LOGI(TAG, "CO2 max returned: %f", CO2max);
+  ESP_LOGI(TAG, "CO2 max returned: %.1f", CO2max);
   return CO2max;
 }
 
