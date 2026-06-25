@@ -35,9 +35,13 @@ static const char* sw_vers_str = "v0.9";   /**< software version */
 
 // CO2 safety thresholds ------------------------------------
 // @brief CO2 concentration thresholds for visual warnings
-static const float thres1 = 0.2f;   /**< Safe level threshold (< 0.2%) */
-static const float thres2 = 0.7f;   /**< Warning level threshold (< 0.7%) */
-static const float thres3 = 3.0f;   /**< Danger level threshold (< 3.0%, near sensor max of 4%) */
+// Hysteresis values for stable display transitions
+static const float thres1_up = 0.15f;    /**< Safe level threshold for increasing values (< 0.2%) */
+static const float thres1_down = 0.1f; /**< Safe level threshold for decreasing values (< 0.15%) */
+static const float thres2_up = 1.0f;    /**< Warning level threshold for increasing values (< 0.7%) */
+static const float thres2_down = 0.95f; /**< Warning level threshold for decreasing values (< 0.65%) */
+static const float thres3_up = 3.0f;    /**< Danger level threshold for increasing values (< 3.0%) */
+static const float thres3_down = 2.95f; /**< Danger level threshold for decreasing values (< 2.95%) */
 
 // display configuration ----------------------------------
 
@@ -94,6 +98,8 @@ static int footer_window_Yoff;
 static bool isFirstMeasurement = true;
 // sensor object
 CO2sensGen CO2sensor;
+// variable to track previous CO2 value for hysteresis
+static float previousCO2Value = 0.0f;
 
 // circular buffer for CO2 trend plotting
 static float co2Buffer[BUFFER_SIZE] = {0}; /**< Circular buffer for CO2 values */
@@ -335,22 +341,47 @@ void displayMainValue(float fval)
     // update main panel
     canvasMain.clear(TFT_BLACK);
 
-    // color coding according to safety thresholds
-    if (fval < thres1)
-    {
-        nb_decimals = 2;  // more precision for low values
-        canvasMain.setTextColor(TFT_GREEN);
-    } else if (fval < thres2)
-    {
-       canvasMain.setTextColor(TFT_ORANGE);
-    } else if (fval < thres3)
-    {
-        canvasMain.setTextColor(TFT_PURPLE);
-    } else 
-    {
-        canvasMain.setTextColor(TFT_RED);
-        M5.Speaker.tone(740, 700);  // audible warning
+    // color coding according to safety thresholds with hysteresis
+    bool isIncreasing = fval > previousCO2Value;
+    
+    if (isIncreasing) {
+        // Use upward thresholds when value is increasing
+        if (fval < thres1_up)
+        {
+            nb_decimals = 2;  // more precision for low values
+            canvasMain.setTextColor(TFT_GREEN);
+        } else if (fval < thres2_up)
+        {
+           canvasMain.setTextColor(TFT_ORANGE);
+        } else if (fval < thres3_up)
+        {
+            canvasMain.setTextColor(TFT_YELLOW);
+        } else 
+        {
+            canvasMain.setTextColor(TFT_RED);
+            M5.Speaker.tone(740, 700);  // audible warning
+        }
+    } else {
+        // Use downward thresholds when value is decreasing
+        if (fval < thres1_down)
+        {
+            nb_decimals = 2;  // more precision for low values
+            canvasMain.setTextColor(TFT_GREEN);
+        } else if (fval < thres2_down)
+        {
+           canvasMain.setTextColor(TFT_ORANGE);
+        } else if (fval < thres3_down)
+        {
+            canvasMain.setTextColor(TFT_YELLOW);
+        } else 
+        {
+            canvasMain.setTextColor(TFT_RED);
+            M5.Speaker.tone(740, 700);  // audible warning
+        }
     }
+    
+    // Update previous value for next call
+    previousCO2Value = fval;
     
     // update circular buffer to store last data 
     co2Buffer[bufferIndex] = fval;
@@ -406,7 +437,7 @@ void drawCO2Plot()
     
     // Calculate scaling factors
     float xScale = Plot_width / (BUFFER_SIZE - 1);
-    float yScale = Plot_width / CO2sensor.getterSensorRangeCO2percent(); // max CO2 range (0-4%)
+    float yScale = Plot_height / CO2sensor.getterSensorRangeCO2percent(); // max CO2 range (0-4%)
     
     // draw no more than samples accumulated
     // Note that bufferFull is pointing to the future value, so we
