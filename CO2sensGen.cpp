@@ -228,3 +228,15 @@ void CO2sensGen::resetCO2max()
 {  
   CO2max = 0;  
 }
+
+
+long CO2sensGen::getterTemp()
+{
+    return (static_cast<int>(tempDegC));
+}
+
+
+long CO2sensGen::getterRH()
+{
+    return (static_cast<int>(humidityPerCent));
+}

@@ -9,14 +9,12 @@
  * History:
  * 2025-12-27: v0.1 - Initial version using SGP30 sensor (discarded - unsuitable for caves)
  * 2026-06-22: v0.9 - First working version using SCD41 sensor
- * @TODO display vers
- * @TODO display trend
+ * 2026-06-25: v1.0 first release
  * @TODO add low power
- *
  */
 #include <M5Unified.h>
 // ESP32 debug origin 
-static const  char* TAG = "MAIN";
+static const char* TAG = "MAIN";
 // sensor insterface
 #include "CO2sensGen.h"
 
@@ -31,17 +29,18 @@ int center_text_fix(int nb_char);
 
 // configuration constants ---------------------------------
 static const char* sw_vers_str = "v0.9";   /**< software version */
-#define ACQ_TIMEOUT_S (uint32_t)20u /**< Acquisition timeout in seconds */
+#define ACQ_TIMEOUT_S (uint32_t)20u     /**< Acquisition timeout in seconds */
+#define TEMP_RH_TO_MS (uint32_t)2000    /**< set time for temporary display of temp and RH using button C */
 
 // CO2 safety thresholds ------------------------------------
 // @brief CO2 concentration thresholds for visual warnings
 // Hysteresis values for stable display transitions
-static const float thres1_up = 0.15f;    /**< Safe level threshold for increasing values (< 0.2%) */
-static const float thres1_down = 0.1f; /**< Safe level threshold for decreasing values (< 0.15%) */
-static const float thres2_up = 1.0f;    /**< Warning level threshold for increasing values (< 0.7%) */
-static const float thres2_down = 0.95f; /**< Warning level threshold for decreasing values (< 0.65%) */
-static const float thres3_up = 3.0f;    /**< Danger level threshold for increasing values (< 3.0%) */
-static const float thres3_down = 2.95f; /**< Danger level threshold for decreasing values (< 2.95%) */
+static const float thres1_up = 0.15f;    /**< Safe level threshold for increasing values */
+static const float thres1_down = 0.1f; /**< Safe level threshold for decreasing values  */
+static const float thres2_up = 1.0f;    /**< Warning level threshold for increasing values  */
+static const float thres2_down = 0.95f; /**< Warning level threshold for decreasing values  */
+static const float thres3_up = 3.0f;    /**< Danger level threshold for increasing values  */
+static const float thres3_down = 2.95f; /**< Danger level threshold for decreasing values  */
 
 // display configuration ----------------------------------
 
@@ -105,10 +104,12 @@ static float previousCO2Value = 0.0f;
 static float co2Buffer[BUFFER_SIZE] = {0}; /**< Circular buffer for CO2 values */
 static uint8_t bufferIndex = 0;            /**< Current position in circular buffer : will behave like an oscilloscope: when buffer size reached will restart at 0 */
 static bool bufferFull = false;            /**< Flag to detect that the whole buffer has been filled */
-static uint32_t nb_failed = 0;             /**< count numbr of successive failed measurements */
+static uint32_t nb_failed = 0;             /**< count number of successive failed measurements */
 
 // Task handle for the button polling task
 TaskHandle_t buttonTaskHandle = NULL;
+
+static uint32_t TempRHdisplayTime_ms = 0;   /**< timer for temporary display of temp + RH */
 
 
 /**
@@ -410,6 +411,11 @@ void displayMainValue(float fval)
 
 
 
+/**
+ * @brief Updates the footer display with maximum CO2 value
+ * @param fval Maximum CO2 concentration in percent to display
+ * @details Shows the maximum recorded CO2 value in the footer area
+ */
 void displayMAXvalue(float fval)
 {    
     // update footer panel ---------------------      
@@ -464,7 +470,13 @@ void drawCO2Plot()
     }   // end loop on samples for display
 }
 
-/** offset to apply to middle display coordinates in order to center the text */
+/**
+ * @brief Calculates X offset to center text on display
+ * @param nb_char Number of characters in the text to center
+ * @return X offset in pixels to center the text
+ * @details Computes the horizontal offset needed to center text
+ * based on character width and number of characters
+ */
 int center_text_fix(int nb_char)
 {
     float text_size = static_cast<float>(char_width * nb_char) / 2 ;
@@ -472,6 +484,13 @@ int center_text_fix(int nb_char)
 }
 
 
+/**
+ * @brief Initializes display dimensions based on LCD size
+ * @param lcd_width Width of the LCD display in pixels
+ * @param lcd_height Height of the LCD display in pixels
+ * @details Calculates and sets all display element positions and sizes
+ * relative to the available screen dimensions
+ */
 void display_InitRelativeDimensions(int lcd_width, int lcd_height)
  {
     float f_lcd_width = static_cast<float>(lcd_width);    
@@ -533,9 +552,36 @@ void buttonPollingTask(void *pvParameters) {
         // value, nb decimals, X offset, Y offset
         canvasFooter.drawFloat(0, 1, lcd_width/2 - center_text_fix(3), footerText_Yoff);
         canvasFooter.pushSprite(&M5.Lcd, 0, footer_window_Yoff );
+    } else
+    if (M5.BtnB.wasPressed()) 
+    {        
+        // request temporary display of temp and RH
+        TempRHdisplayTime_ms = millis();
+        ESP_LOGI(TAG, "Request to display Temp  + RH");
+        canvasHeader.clear(TFT_NAVY);            
+        canvasHeader.drawNumber(CO2sensor.getterTemp(), 0, headerText_Yoff);
+        canvasHeader.drawString("C %", lcd_width/2 - center_text_fix(3), headerText_Yoff);        
+        canvasHeader.drawNumber(CO2sensor.getterRH(), lcd_width - center_text_fix(4), headerText_Yoff);        
+        canvasHeader.pushSprite(&M5.Lcd, 0, 0);
+    } else
+    {
+        if (TempRHdisplayTime_ms > 0)
+        {
+            if ( (millis() - TempRHdisplayTime_ms) > TEMP_RH_TO_MS)
+            {
+                // time to erase temporary display of temparature and RH
+                TempRHdisplayTime_ms = 0;
+                // reset header to standard display
+                canvasHeader.clear(TFT_NAVY);            
+                canvasHeader.drawString("%CO2",lcd_width/2 - center_text_fix(4), headerText_Yoff);                        
+                canvasHeader.pushSprite(&M5.Lcd, 0, 0);
+            }
+        }        
     }
 
     // Delay for 200ms (periodic)
     vTaskDelayUntil(&lastWakeTime, pdMS_TO_TICKS(200));
   }
 }
+
+

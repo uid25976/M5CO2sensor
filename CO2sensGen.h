@@ -87,6 +87,18 @@ public:
 	 * @return Maximum CO2 concentration encountered since last reset
 	 */
 	float getterCO2max();
+
+	/*!
+	 * @brief Gets temperature
+	 * @return temperature in degC
+	 */
+	long getterTemp();
+
+	/*!
+	 * @brief Gets Relative humidity
+	 * @return RH in precent
+	 */
+	long getterRH();
 	
 	/*!
 	 * @brief Resets the maximum CO2 concentration tracking
@@ -105,6 +117,8 @@ public:
 	 * @return String representation of the sensor type (e.g., "SCD41")
 	 */
 	const char* getSensorName();
+
+	
 
 protected:
 	/*!
