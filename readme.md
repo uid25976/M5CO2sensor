@@ -3,7 +3,8 @@ This project intends to provide cavers with a CO2 sensor that they can build the
 It is based on a M5stickCplus2 and a M5 CO2L sensor (SCD41) that can be bought from M5stack.com.
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
-![assembly](/pict.assembly.png)
+
+![assembly](pict/assembly.png)
 
 
 # Disclaimer
@@ -25,10 +26,11 @@ Using the front button you can reset this maximum.
 
 ### Plot
 It displays the last 50 measurements which translates into 5 minutes of records. This allows you to check if the measurements were stabilized i(see above).
+![assembly](pict/highCO2.png)
 
 ### Ambiant temperature and humidity
 Press button C (on the right side) : this will display the temperature and relative humidity for 2s
-![in_use](/pict.temp_rh.png)
+![in_use](pict/temp_rh.png)
 
 
 # Building your detector
@@ -38,7 +40,7 @@ Hardware:
 - M5Stack M5StickC plus2
 - M5Stack CO2L sensor (based on SCD41X)
 - There is a proposal for housing as a FreeCAD 3D model that is shaped in such a way that you can put it inside a plumbing PVC hose closed on both ends using PVC removable caps. But you can create your own housing, just take care to protect the detector as much as possible as it was not intended for such a hostile environment. Unfortunately, the sensor must be in contact with the air to measure CO2.
-![in_use](/pict.housing.png)
+![in_use](pict/housing.png)
 
 On the software side you will need:
 - Arduino IDE 2.3.X
