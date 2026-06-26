@@ -28,7 +28,7 @@ void display_InitRelativeDimensions(int lcd_width, int lcd_height);
 int center_text_fix(int nb_char);
 
 // configuration constants ---------------------------------
-static const char* sw_vers_str = "v0.9";   /**< software version */
+static const char* sw_vers_str = "v1.0";   /**< software version */
 #define ACQ_TIMEOUT_S (uint32_t)20u     /**< Acquisition timeout in seconds */
 #define TEMP_RH_TO_MS (uint32_t)2000    /**< set time for temporary display of temp and RH using button C */
 
